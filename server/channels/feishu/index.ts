@@ -704,7 +704,9 @@ export class FeishuAdapter implements ChannelAdapter {
           chatId,
           threadId,
           undefined,
-          "card",
+          // CardKit card instances are sent as interactive messages. `card`
+          // is the old message type and Feishu rejects it with 230001.
+          "interactive",
           JSON.stringify({ type: "card", data: { card_id: cardId } }),
         );
       } catch (error) {

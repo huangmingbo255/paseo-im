@@ -78,7 +78,7 @@ await api.dispose(); await client.close();
 
 ### 验收期真实修复
 1. **telegram 网络层错误文案中文化**（`server/channels/telegram/index.ts`）：`fetch failed` 等 DNS/网络错误现为「无法连接 Telegram API（网络错误）。请检查本机网络对 api.telegram.org 的可达性，连接将自动重试。」
-2. **lark/baileys 运行时装载**（`server/channels/runtime-loader.ts`）：daemon 以裸函数作用域执行 CJS 包，`__dirname`/`import.meta` 皆不可用——两个 SDK 改为 `import(pathToFileURL(require.resolve(...)))` 运行时装载（锚定 `process.argv[1]` 所在插件目录）。
+2. **lark/baileys 运行时装载**（`server/channels/runtime-loader.ts`）：daemon 以裸函数作用域执行 CJS 包，`__dirname`/`import.meta` 皆不可用——两个 SDK 改为 `import(pathToFileURL(require.resolve(...)))` 运行时装载，优先锚定 daemon 配置中的插件目录，并保留 standalone fallback。
 
 ### 环境说明
 - 第二 daemon：`PASEO_HOME=~/.paseo-webui`，端口 **http://127.0.0.1:6768**（WebUI 已开、插件已装、可直接浏览器打开复核）；停止：`PASEO_HOME="$HOME/.paseo-webui" paseo daemon stop`。

@@ -14,7 +14,7 @@
 **修复**：重 SDK 走运行时装载（`server/channels/runtime-loader.ts`），specifier 收进运行时字符串（esbuild 保持不透明）：
 
 ```ts
-const require_ = createRequire(join(dirname(process.argv[1]), "package.json")); // 子进程入口必在插件目录内
+const require_ = createRequire(join(pluginDirectory, "package.json")); // 由 daemon 配置提供插件目录
 export async function loadPackage<T>(name: string): Promise<T> {
   const entry = require_.resolve(name);
   return import(pathToFileURL(entry).href) as T;  // CJS/ESM 通吃
@@ -148,3 +148,13 @@ net.setDefaultAutoSelectFamily(false);
 **验证**：重载后日志 `恢复 1 条中断的在途回复。`（weixin/qq 各一）→ 补发走完 `sendmessage ok`（bytes=274，恰好 1 次 HTTP）→ 用户截图确认微信侧恰好显示 1 遍。1 发 = 1 显，出站链路干净；历史「三连显示」若再现即为 iLink 平台显示层。
 
 **附带坑**：并行全量 `npm test` 下 whatsapp 配对测试（二维码→scanned→ok）会时序 flake（10ms 级断言），单独跑必过（HEAD 与改动侧均验证）——判「我的改动弄坏的」之前先单跑该文件。
+
+## 5.10 飞书群消息创建 agent 失败（工作区归档与幂等键冲突）
+
+**现象**：飞书群里 @ 机器人后只收到「任务需要在 Paseo 中处理，请打开 Paseo 查看详情」。日志先出现 `Workspace is archived`，后续重试出现 `agent_request_key_conflict`；进度卡片另报 `invalid msg_type: card`。
+
+**根因**：IM 插件复用同一个群聊幂等键创建 agent。Paseo 的创建幂等记录可能长于 agent 生命周期，第一次创建因工作区归档失败后，继续复用旧键会永久冲突；同时 CardKit 卡片实体必须以 `interactive` 消息引用，旧 `card` 类型会被飞书以 230001 拒绝。
+
+**修复**：创建遇到幂等键冲突时使用随机键重试；工作区归档时返回重新选择活动工作区的可读错误；将 CardKit 引用消息改为 `interactive`；运行时 SDK 从插件配置目录解析，并把 `@getpaseo/client` 放入生产依赖。
+
+**验证**：`tests/routing-agent-create.test.ts` 覆盖冲突换键和归档错误；飞书流式测试断言 `interactive`；`npm run typecheck`、`npm run check:package`、`npm run check:runtime` 通过。

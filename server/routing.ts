@@ -1,4 +1,5 @@
 import type { PaseoApi } from "@getpaseo/client";
+import { randomUUID } from "node:crypto";
 import type { Connection, Target } from "../shared/config.ts";
 import { UserFacingError } from "../shared/errors.ts";
 import type { PaseoImTargetEntry } from "./bots-contract.ts";
@@ -51,6 +52,16 @@ export class Router {
 
   private api(): Promise<PaseoApi> {
     return this.daemon();
+  }
+
+  private isRequestKeyConflict(error: unknown): boolean {
+    const message = error instanceof Error ? error.message : String(error);
+    return /agent_request_key_conflict/i.test(message);
+  }
+
+  private isWorkspaceArchived(error: unknown): boolean {
+    const message = error instanceof Error ? error.message : String(error);
+    return /workspace is archived|workspace.*archiv/i.test(message);
   }
 
   targetFor(config: Connection, conversationKey: string): Target | null {
@@ -139,12 +150,32 @@ export class Router {
       snap: { agent: { archivedAt?: string | null; status?: string | null } } | null | undefined,
     ) => Boolean(snap && !snap.agent.archivedAt && snap.agent.status !== "closed");
 
-    // 首选幂等键创建；若 daemon 幂等返回了已归档/关闭实例，换随机键重建一次
-    let agent = await workspace.agents.create(buildPayload(`im-agent-${config.id}-${conversationKey}${recreateSuffix}`));
+    // 首选幂等键创建。Paseo 的创建幂等记录可能长于 agent 生命周期，
+    // 也可能保留一次失败请求；冲突时必须换键，否则同一群会永久失败。
+    const stableKey = `im-agent-${config.id}-${conversationKey}${recreateSuffix}`;
+    let agent;
+    try {
+      agent = await workspace.agents.create(buildPayload(stableKey));
+    } catch (error) {
+      if (this.isWorkspaceArchived(error)) {
+        throw new UserFacingError("所选工作区已归档，请在 Paseo → IM 中重新选择一个活动工作区。");
+      }
+      if (!this.isRequestKeyConflict(error)) throw error;
+      const retryKey = `im-agent-${config.id}-${conversationKey}-g${randomUUID()}`;
+      this.log("warn", `创建会话 agent 的幂等键冲突，使用新键重试（conv=${conversationKey.slice(0, 40)}）`);
+      try {
+        agent = await workspace.agents.create(buildPayload(retryKey));
+      } catch (retryError) {
+        if (this.isWorkspaceArchived(retryError)) {
+          throw new UserFacingError("所选工作区已归档，请在 Paseo → IM 中重新选择一个活动工作区。");
+        }
+        throw retryError;
+      }
+    }
     let created = await agent.refresh().catch(() => null);
     if (!isAlive(created)) {
       this.log("warn", `幂等创建返回了不可用实例（${agent.id.slice(0, 8)}，status=${created?.agent?.status ?? "null"}），换随机键重建`);
-      const retry = await workspace.agents.create(buildPayload(`im-agent-${config.id}-${conversationKey}-g${Date.now().toString(36)}`));
+      const retry = await workspace.agents.create(buildPayload(`im-agent-${config.id}-${conversationKey}-g${randomUUID()}`));
       created = await retry.refresh().catch(() => null);
       if (!isAlive(created)) {
         throw new UserFacingError("无法在该工作区创建新的 IM 会话聊天（重复返回已归档实例），请检查工作区后重试。");

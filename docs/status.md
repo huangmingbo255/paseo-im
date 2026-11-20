@@ -25,6 +25,7 @@
 | 微信配对无二维码 | 点击扫码配对无响应/白卡 | qrUrl 是 text/html 落地页 + pollLogin 30s 阻塞 + configure 鸡生蛋死锁 | gotchas §5.7 |
 | 凭证输入无显示/切换 | 手机端无眼睛按钮 | labelAccessory 仅 web host 渲染 | gotchas §5.6 |
 | 改去向不生效 | 换新 agent 后消息仍进旧会话 | 会话绑定压过 target + save 双实例竞态回滚 | gotchas §5.8 |
+| 飞书群消息进入通用失败提示 | 工作区曾归档或创建请求键冲突后，后续 @ 消息持续失败 | agent 创建异常未轮换幂等键；CardKit 卡片使用旧 `card` 消息类型 | gotchas §5.10 |
 | 钉钉卡片无令牌（P0） | 整渠道进度流必坏 | 审查发现 | channel-test-matrix |
 | P1×10 / P2×30 | 各渠道审查项 | 四组并行深审 | 审查修复提交线（36 文件 +1993/-295） | 同上 |
 
