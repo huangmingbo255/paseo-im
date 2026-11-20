@@ -54,6 +54,7 @@ const RECONNECT_DELAYS_MS = [1_000, 3_000, 5_000, 10_000, 30_000] as const;
 const SEEN_CAP = 1_000;
 const STREAMS_CAP = 32;
 const PROGRESS_PLACEHOLDER = "⏳ 正在处理…";
+const MAX_QUOTED_TEXT = 12_000;
 
 const adapterStateSchema = z
   .object({
@@ -361,6 +362,61 @@ function collectPost(parsed: Record<string, unknown> | null): { text: string; ta
     if (line) lines.push(line);
   }
   return { text: lines.join("\n"), targets };
+}
+
+const CARD_METADATA_KEYS = new Set([
+  "tag",
+  "type",
+  "schema",
+  "version",
+  "url",
+  "href",
+  "value",
+  "option",
+  "options",
+  "size",
+  "color",
+  "margin",
+  "align",
+  "weight",
+  "behaviors",
+  "actions",
+  "action_type",
+]);
+
+/** Extract readable text from an interactive/card message without forwarding
+ * raw card JSON or action metadata into the agent. */
+function collectCardText(value: unknown, key = "", output: string[] = []): string {
+  if (output.join("\n").length >= MAX_QUOTED_TEXT) return output.join("\n").slice(0, MAX_QUOTED_TEXT);
+  if (typeof value === "string") {
+    const text = value.trim();
+    if (text && !CARD_METADATA_KEYS.has(key) && !/^https?:\/\//i.test(text)) output.push(text);
+    return output.join("\n").slice(0, MAX_QUOTED_TEXT);
+  }
+  if (Array.isArray(value)) {
+    for (const item of value) collectCardText(item, key, output);
+    return output.join("\n").slice(0, MAX_QUOTED_TEXT);
+  }
+  if (!isRecord(value)) return output.join("\n").slice(0, MAX_QUOTED_TEXT);
+  for (const [childKey, child] of Object.entries(value)) {
+    if (CARD_METADATA_KEYS.has(childKey)) continue;
+    collectCardText(child, childKey, output);
+  }
+  return output.join("\n").slice(0, MAX_QUOTED_TEXT);
+}
+
+function quotedMessageText(item: LarkMessageItem): string | undefined {
+  const raw = nonEmpty(item.body?.content);
+  if (!raw) return undefined;
+  const parsed = parseJsonContent(raw);
+  if (!parsed) return raw.slice(0, MAX_QUOTED_TEXT);
+  if (item.msg_type === "text") return nonEmpty(parsed.text)?.slice(0, MAX_QUOTED_TEXT);
+  if (item.msg_type === "post") {
+    const post = collectPost(parsed).text.trim();
+    return post ? post.slice(0, MAX_QUOTED_TEXT) : undefined;
+  }
+  const card = collectCardText(parsed).trim();
+  return card ? card.slice(0, MAX_QUOTED_TEXT) : undefined;
 }
 
 /** 按消息类型解析原始文本与媒体目标；sticker/interactive/share_* 等视为噪音。 */
@@ -989,10 +1045,8 @@ export class FeishuAdapter implements ChannelAdapter {
       : mentions.length > 0;
     const parentId = nonEmpty(message.parent_id);
     // @命中即无需再查被回复消息；否则 own 集未命中时经 message.get 兜底判定。
-    const replyToBot =
-      chatType === "group" && parentId !== null
-        ? mention || (await this.#isReplyToBot(parentId))
-        : false;
+    const quoted = parentId ? await this.#getReplyInfo(parentId) : { isBot: false };
+    const replyToBot = chatType === "group" && parentId !== null ? mention || quoted.isBot : false;
 
     const normalized: NormalizedMessage = {
       channel: "feishu",
@@ -1005,7 +1059,15 @@ export class FeishuAdapter implements ChannelAdapter {
       timestamp: normalizeTimestamp(message.create_time),
       ...(text ? { text } : {}),
       ...(media.length > 0 ? { media } : {}),
-      ...(parentId ? { replyTo: { id: parentId } } : {}),
+      ...(parentId
+        ? {
+            replyTo: {
+              id: parentId,
+              ...(quoted.text ? { text: quoted.text } : {}),
+              ...(quoted.sender ? { sender: quoted.sender } : {}),
+            },
+          }
+        : {}),
       trigger: { mention, replyToBot, command: text.startsWith("/") },
     };
     await this.#flushState();
@@ -1013,16 +1075,20 @@ export class FeishuAdapter implements ChannelAdapter {
     this.#ctx.onMessage(normalized);
   }
 
-  async #isReplyToBot(parentId: string): Promise<boolean> {
-    if (this.#own.includes(parentId)) return true;
+  async #getReplyInfo(parentId: string): Promise<{ isBot: boolean; text?: string; sender?: string }> {
+    const own = this.#own.includes(parentId);
     const client = this.#client;
-    if (!client) return false;
+    if (!client) return { isBot: own };
     try {
       const response = unwrap("查询被回复消息", await client.im.v1.message.get({ path: { message_id: parentId } }));
       const item = response.data?.items?.[0];
-      return item?.sender?.sender_type === "app" || (!!this.#botOpenId && item?.sender?.id === this.#botOpenId);
+      return {
+        isBot:
+          own || item?.sender?.sender_type === "app" || (!!this.#botOpenId && item?.sender?.id === this.#botOpenId),
+        ...(item ? { text: quotedMessageText(item), sender: item.sender?.id ?? item.sender?.sender_type } : {}),
+      };
     } catch {
-      return false; // 查询失败不阻塞消息投递
+      return { isBot: own }; // 查询失败不阻塞消息投递
     }
   }
 

@@ -216,6 +216,22 @@ test("/compact 原样发送给 Paseo provider，并回传完成提示", async ()
   h.deferred.stop();
 });
 
+test("引用消息内容会和当前问题一起发送给 agent", async () => {
+  const h = await harness({});
+  await h.bridge.handle(
+    dmMessage({
+      messageId: "quoted-1",
+      text: "分析这个告警是什么问题",
+      replyTo: { id: "alert-1", sender: "ou-alert", text: "生产接口 5xx\nstatus=500" },
+    }),
+  );
+  await h.queue.idle();
+  assert.match(h.agentCalls.send[0]?.text ?? "", /引用的消息内容/);
+  assert.match(h.agentCalls.send[0]?.text ?? "", /生产接口 5xx/);
+  assert.match(h.agentCalls.send[0]?.text ?? "", /分析这个告警是什么问题/);
+  h.deferred.stop();
+});
+
 test("同 messageId 幂等去重", async () => {
   const h = await harness({});
   await h.bridge.handle(dmMessage());

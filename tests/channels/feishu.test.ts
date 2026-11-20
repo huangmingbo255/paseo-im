@@ -458,11 +458,45 @@ test("normalize：回复机器人消息 → replyToBot（own 集与 message.get 
   harness.lark.messageItems = [{ message_id: "om_hist_bot", sender: { id: BOT_OPEN_ID, sender_type: "app" } }];
   await harness.dispatcher.emit(groupEvent("om_g3", { parent_id: "om_hist_bot" }));
   assert.equal(harness.received[1]?.trigger.replyToBot, true);
-  assert.deepEqual(harness.received[1]?.replyTo, { id: "om_hist_bot" });
+  assert.deepEqual(harness.received[1]?.replyTo, { id: "om_hist_bot", sender: BOT_OPEN_ID });
   // 路径三：回复的是普通用户消息。
   harness.lark.messageItems = [{ message_id: "om_hist_user", sender: { id: "ou_alice", sender_type: "user" } }];
   await harness.dispatcher.emit(groupEvent("om_g4", { parent_id: "om_hist_user" }));
   assert.equal(harness.received[2]?.trigger.replyToBot, false);
+});
+
+test("normalize：引用告警卡片时读取引用内容", async () => {
+  const harness = await createHarness();
+  await harness.adapter.start();
+  harness.lark.messageItems = [
+    {
+      message_id: "om_alert",
+      msg_type: "interactive",
+      sender: { id: "ou_alert", sender_type: "user" },
+      body: {
+        content: JSON.stringify({
+          title: "SLS 告警",
+          elements: [
+            { tag: "div", text: { tag: "plain_text", content: "生产接口 5xx" } },
+            { tag: "div", text: { tag: "plain_text", content: "/common/api/v1/file/presigned-url status=500" } },
+          ],
+        }),
+      },
+    },
+  ];
+  await harness.dispatcher.emit(
+    groupEvent("om_quote_alert", {
+      parent_id: "om_alert",
+      content: JSON.stringify({ text: "@_user_1 分析这个告警是什么问题" }),
+      mentions: [{ key: "@_user_1", id: { open_id: BOT_OPEN_ID }, name: "Paseo" }],
+    }),
+  );
+  const message = harness.received[0]!;
+  assert.equal(message.trigger.replyToBot, true);
+  assert.equal(message.replyTo?.id, "om_alert");
+  assert.equal(message.replyTo?.sender, "ou_alert");
+  assert.match(message.replyTo?.text ?? "", /生产接口 5xx/);
+  assert.match(message.replyTo?.text ?? "", /presigned-url/);
 });
 
 test("normalize：同一 message_id 去重只投递一次；重启后状态文件继续去重", async () => {

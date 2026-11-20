@@ -168,3 +168,13 @@ net.setDefaultAutoSelectFamily(false);
 **修复**：`Bridge` 识别 `/compact` 和带说明的 `/compact <args>`，原样发送给 Paseo agent；等待命令完成后回发「上下文压缩已完成」。普通消息继续使用第三方输入安全包装。
 
 **限制**：是否能压缩由当前 provider 决定。Paseo 的 Claude、OpenCode、OMP、Pi 等 provider 对 slash command 的支持可能不同；不支持的 provider 可能返回未知命令或执行失败。
+
+## 5.12 飞书引用消息转交 agent
+
+**现象**：在飞书里回复 SLS 告警卡片并 @机器人，agent 只能看到“分析这个告警”，看不到被回复的告警内容。
+
+**根因**：飞书事件包含被引用消息的 `parent_id`，旧逻辑只调用 `im.v1.message.get` 判断该消息是否由机器人发送，没有读取 `body.content`。
+
+**修复**：引用消息到达时查询原消息，解析文本、`post` 富文本和 interactive/card 内容中的可读字符串，保存到 `replyTo.text`；桥接层把引用内容和当前问题一起发送给 agent，并标注引用数据来自第三方 IM。卡片按钮、URL 和动作元数据不会被当作指令转交。
+
+**验证**：飞书适配器测试覆盖交互告警卡片引用，桥接测试覆盖引用内容和当前问题同时进入 agent prompt；`npm run typecheck`、`npm run check:package`、`npm run check:runtime` 通过。

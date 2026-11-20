@@ -32,6 +32,14 @@ export const jobSchema = z
     threadId: z.string().max(256).nullable().default(null),
     senderId: z.string().min(1).max(256),
     text: z.string().max(20_000).nullable().default(null),
+    replyTo: z
+      .object({
+        id: z.string().max(256).optional(),
+        text: z.string().max(12_000).optional(),
+        sender: z.string().max(256).optional(),
+      })
+      .nullable()
+      .default(null),
     routeKey: z.string().max(400).nullable().default(null),
     agentId: z.string().max(256).nullable().default(null),
     dispatch: z.enum(["sending", "sent"]).nullable().default(null),
