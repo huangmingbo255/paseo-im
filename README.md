@@ -53,6 +53,8 @@ paseo plugin add /absolute/path/to/paseo-im
 - **已有 Paseo 聊天**：消息进同一 agent 与历史（可显式开启多会话共享）。
 - **工作区**：每个 IM 会话在工作区新建独立 agent（提供方/模型/模式/思考等级/系统提示词可定制）。
 
+在已绑定的会话中发送 `/compact` 或 `/compact <说明>`，插件会把它作为 Paseo provider 的原生 slash command 发送，用于压缩上下文；完成后会回传「上下文压缩已完成」。该命令是否可用取决于当前 agent provider 是否支持 `compact`。
+
 ## 访问与安全
 
 - 私聊：所有人 或 名单用户（用户 ID 名单，按渠道 sender id 形态）。

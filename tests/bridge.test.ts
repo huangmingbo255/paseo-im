@@ -4,7 +4,7 @@ import { mkdtemp, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import type { PaseoApi } from "@getpaseo/client";
-import { Bridge, DeferredTimeoutError, type BridgeDeps } from "../server/bridge.ts";
+import { Bridge, compactCommand, DeferredTimeoutError, type BridgeDeps } from "../server/bridge.ts";
 import { Router } from "../server/routing.ts";
 import { AgentQueue } from "../server/queue.ts";
 import { StateStore } from "../server/state-store.ts";
@@ -191,6 +191,28 @@ test("私聊消息全链路：派发→等待→分段回复", async () => {
   const job = h.state.job("m1");
   assert.equal(job?.delivery, "done");
   assert.equal(job?.agentId, AGENT_ID);
+  h.deferred.stop();
+});
+
+test("/compact 原样发送给 Paseo provider，并回传完成提示", async () => {
+  assert.equal(compactCommand("/compact"), "/compact");
+  assert.equal(compactCommand(" /COMPACT  保留最近结论 "), "/compact 保留最近结论");
+  assert.equal(compactCommand("/compactness"), null);
+
+  const h = await harness({});
+  await h.bridge.handle(
+    dmMessage({
+      messageId: "compact-1",
+      text: "/compact 保留最近结论",
+      trigger: { mention: false, replyToBot: false, command: true },
+    }),
+  );
+  await h.queue.idle();
+
+  assert.equal(h.agentCalls.send.length, 1);
+  assert.equal(h.agentCalls.send[0]?.text, "/compact 保留最近结论");
+  assert.ok(h.sent.some((out) => out.text === "上下文压缩已完成。"));
+  assert.equal(h.state.job("compact-1")?.delivery, "done");
   h.deferred.stop();
 });
 

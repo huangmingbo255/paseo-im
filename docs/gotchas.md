@@ -158,3 +158,13 @@ net.setDefaultAutoSelectFamily(false);
 **修复**：创建遇到幂等键冲突时使用随机键重试；工作区归档时返回重新选择活动工作区的可读错误；将 CardKit 引用消息改为 `interactive`；运行时 SDK 从插件配置目录解析，并把 `@getpaseo/client` 放入生产依赖。
 
 **验证**：`tests/routing-agent-create.test.ts` 覆盖冲突换键和归档错误；飞书流式测试断言 `interactive`；`npm run typecheck`、`npm run check:package`、`npm run check:runtime` 通过。
+
+## 5.11 IM 侧上下文压缩命令
+
+**现象**：在飞书群里发送 `/compact` 后，agent 把它当普通问题处理，没有压缩上下文。
+
+**根因**：IM 桥接层会给普通消息加上渠道和发送者说明。provider 只有在收到以 `/compact` 开头的原始 prompt 时，才会识别原生 slash command。
+
+**修复**：`Bridge` 识别 `/compact` 和带说明的 `/compact <args>`，原样发送给 Paseo agent；等待命令完成后回发「上下文压缩已完成」。普通消息继续使用第三方输入安全包装。
+
+**限制**：是否能压缩由当前 provider 决定。Paseo 的 Claude、OpenCode、OMP、Pi 等 provider 对 slash command 的支持可能不同；不支持的 provider 可能返回未知命令或执行失败。
